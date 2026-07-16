@@ -10,7 +10,7 @@ type OsmWay = { id:number; tags?:Record<string,string>; geometry?:{lat:number;lo
 type ElevationGrid = { size:number; extent:number; values:number[]; center:number };
 const fallback = { lat: 25.18339, lon: 121.41147 };
 const hostedApiOrigin = "https://walk-the-earth-tw.funsteam99.chatgpt.site";
-const isGitHubPages = () => typeof location !== "undefined" && location.hostname.endsWith("github.io");
+const isGitHubPages = () => typeof location !== "undefined" && (location.hostname.endsWith("github.io") || location.hostname==="shezi.org.tw" || location.hostname==="www.shezi.org.tw");
 const apiUrl = (path:string) => isGitHubPages() ? `${hostedApiOrigin}${path}` : path;
 const assetUrl = (path:string) => isGitHubPages() ? new URL(`.${path}`,document.baseURI).toString() : path;
 let activeElevation:ElevationGrid|null=null;

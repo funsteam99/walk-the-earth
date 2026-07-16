@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-const corsHeaders = { "Access-Control-Allow-Origin": "https://funsteam99.github.io", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
+const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
 export async function OPTIONS() { return new NextResponse(null, { status: 204, headers: corsHeaders }); }
 
 export async function GET(request: NextRequest) {
