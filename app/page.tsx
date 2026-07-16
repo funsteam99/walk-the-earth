@@ -1,104 +1,51 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import * as THREE from "three";
 
 type ViewMode = "first" | "follow";
-
 const fallback = { lat: 25.033, lon: 121.5654 };
+const heightAt = (x:number,z:number) => Math.sin(x*.028)*2.1 + Math.cos(z*.024)*1.7 + Math.sin((x+z)*.017)*1.3;
 
-export default function Home() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const keys = useRef<Record<string, boolean>>({});
-  const player = useRef({ x: 0, z: 10, y: 2.4, heading: 0, submerged: 0 });
-  const [coords, setCoords] = useState(fallback);
-  const [draft, setDraft] = useState(fallback);
-  const [view, setView] = useState<ViewMode>("first");
-  const [status, setStatus] = useState("準備探索");
-  const [started, setStarted] = useState(false);
-  const [locating, setLocating] = useState(false);
+export default function Home(){
+  const mount=useRef<HTMLDivElement>(null), keys=useRef<Record<string,boolean>>({});
+  const engine=useRef<{player:THREE.Group;camera:THREE.PerspectiveCamera;heading:number;pitch:number;velocity:number;renderer:THREE.WebGLRenderer}|null>(null);
+  const [coords,setCoords]=useState(fallback),[draft,setDraft]=useState(fallback),[view,setView]=useState<ViewMode>("first");
+  const [status,setStatus]=useState("準備探索"),[started,setStarted]=useState(false),[locating,setLocating]=useState(false),[depth,setDepth]=useState(0),[locked,setLocked]=useState(false);
 
-  const locate = useCallback(() => {
-    setLocating(true); setStatus("正在取得位置…");
-    if (!navigator.geolocation) { setLocating(false); setStatus("此裝置不支援定位"); return; }
-    navigator.geolocation.getCurrentPosition(
-      p => { const next = { lat: p.coords.latitude, lon: p.coords.longitude }; setCoords(next); setDraft(next); setLocating(false); setStatus(`定位精度約 ${Math.round(p.coords.accuracy)} 公尺`); },
-      () => { setLocating(false); setStatus("無法定位，已使用台北 101"); },
-      { enableHighAccuracy: true, timeout: 9000, maximumAge: 60000 }
-    );
-  }, []);
+  const locate=useCallback(()=>{setLocating(true);setStatus("正在取得位置…");if(!navigator.geolocation){setLocating(false);setStatus("此裝置不支援定位");return}navigator.geolocation.getCurrentPosition(p=>{const n={lat:p.coords.latitude,lon:p.coords.longitude};setCoords(n);setDraft(n);setLocating(false);setStatus(`定位精度約 ${Math.round(p.coords.accuracy)} 公尺`)},()=>{setLocating(false);setStatus("無法定位，已使用台北 101")},{enableHighAccuracy:true,timeout:9000,maximumAge:60000})},[]);
+  useEffect(()=>{locate()},[locate]);
+  useEffect(()=>{const d=(e:KeyboardEvent)=>{keys.current[e.key.toLowerCase()]=true;if(["w","a","s","d","arrowup","arrowdown","arrowleft","arrowright"," "].includes(e.key.toLowerCase()))e.preventDefault()},u=(e:KeyboardEvent)=>keys.current[e.key.toLowerCase()]=false;addEventListener("keydown",d);addEventListener("keyup",u);return()=>{removeEventListener("keydown",d);removeEventListener("keyup",u)}},[]);
 
-  useEffect(() => { locate(); }, [locate]);
+  useEffect(()=>{
+    if(!started||!mount.current)return; const host=mount.current;
+    const scene=new THREE.Scene();scene.background=new THREE.Color(0xa9ccda);scene.fog=new THREE.FogExp2(0xa9ccda,.0065);
+    const camera=new THREE.PerspectiveCamera(67,host.clientWidth/host.clientHeight,.08,600);
+    const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:"high-performance"});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(host.clientWidth,host.clientHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;host.appendChild(renderer.domElement);
+    scene.add(new THREE.HemisphereLight(0xe8f3ff,0x415039,2.2));const sun=new THREE.DirectionalLight(0xfff2d3,3.4);sun.position.set(-65,90,-35);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-120;sun.shadow.camera.right=120;sun.shadow.camera.top=120;sun.shadow.camera.bottom=-120;scene.add(sun);
+    const terrainGeo=new THREE.PlaneGeometry(260,260,100,100);terrainGeo.rotateX(-Math.PI/2);const pos=terrainGeo.attributes.position as THREE.BufferAttribute;for(let i=0;i<pos.count;i++)pos.setY(i,heightAt(pos.getX(i),pos.getZ(i)));terrainGeo.computeVertexNormals();
+    const terrain=new THREE.Mesh(terrainGeo,new THREE.MeshStandardMaterial({color:0x71855b,roughness:.96,metalness:0,vertexColors:false}));terrain.receiveShadow=true;scene.add(terrain);
+    const grid=new THREE.GridHelper(260,52,0x526746,0x80916d);grid.position.y=.08;grid.material.transparent=true;grid.material.opacity=.2;scene.add(grid);
+    const road=new THREE.Mesh(new THREE.PlaneGeometry(9,250),new THREE.MeshStandardMaterial({color:0x62625d,roughness:1}));road.rotation.x=-Math.PI/2;road.position.y=.16;road.receiveShadow=true;scene.add(road);
+    for(let z=-110;z<120;z+=12){const mark=new THREE.Mesh(new THREE.PlaneGeometry(.18,5),new THREE.MeshBasicMaterial({color:0xe7dfbd}));mark.rotation.x=-Math.PI/2;mark.position.set(0,.18,z);scene.add(mark)}
+    const waterGeo=new THREE.PlaneGeometry(110,135,36,36);const water=new THREE.Mesh(waterGeo,new THREE.MeshPhysicalMaterial({color:0x3488a1,transparent:true,opacity:.72,roughness:.15,metalness:.08,transmission:.12}));water.rotation.x=-Math.PI/2;water.position.set(76,1,38);scene.add(water);
+    const seabed=new THREE.Mesh(new THREE.PlaneGeometry(110,135,20,20),new THREE.MeshStandardMaterial({color:0x52685d,roughness:1}));seabed.rotation.x=-Math.PI/2;seabed.position.set(76,-10,38);scene.add(seabed);
+    const collision:THREE.Box3[]=[];const specs=[[-24,-36,15,20,17],[19,-42,18,15,26],[42,-22,14,20,14],[-47,-5,20,16,31],[-29,31,15,21,16],[14,38,26,14,22],[45,35,16,17,13],[16,-12,13,13,37],[-18,70,22,16,24]];
+    specs.forEach(([x,z,w,d,h],idx)=>{const y=heightAt(x,z);const mat=new THREE.MeshStandardMaterial({color:[0xcbbfa8,0xb7c2b1,0xd4c6ad][idx%3],roughness:.84});const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);b.position.set(x,y+h/2,z);b.castShadow=b.receiveShadow=true;scene.add(b);collision.push(new THREE.Box3().setFromObject(b));const roof=new THREE.Mesh(new THREE.BoxGeometry(w+.7,.5,d+.7),new THREE.MeshStandardMaterial({color:0xe8ddc5}));roof.position.set(x,y+h+.25,z);roof.castShadow=true;scene.add(roof);for(let yy=y+3;yy<y+h-1;yy+=3.4)for(const side of [-1,1]){const wins=new THREE.Mesh(new THREE.PlaneGeometry(w*.24,1.2),new THREE.MeshStandardMaterial({color:0x456069,emissive:0x18262a,emissiveIntensity:.4}));wins.position.set(x+side*w*.25,yy,z+d/2+.011);scene.add(wins)}});
+    for(let i=0;i<90;i++){const x=(Math.sin(i*83.17)*.5+.5)*240-120,z=(Math.sin(i*31.7)*.5+.5)*240-120;if(Math.abs(x)<9||x>22)continue;const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.22,.35,2.2,6),new THREE.MeshStandardMaterial({color:0x6b5237}));trunk.position.set(x,heightAt(x,z)+1.1,z);const crown=new THREE.Mesh(new THREE.ConeGeometry(1.8,4.8,7),new THREE.MeshStandardMaterial({color:0x3f6547}));crown.position.set(x,heightAt(x,z)+4.3,z);trunk.castShadow=crown.castShadow=true;scene.add(trunk,crown)}
+    const player=new THREE.Group();const ghostMat=new THREE.MeshPhysicalMaterial({color:0xe7fff6,transparent:true,opacity:.28,roughness:.1,transmission:.45,depthWrite:false});const body=new THREE.Mesh(new THREE.CapsuleGeometry(.34,1.05,5,10),ghostMat),head=new THREE.Mesh(new THREE.SphereGeometry(.3,16,12),ghostMat);body.position.y=1;head.position.y=1.86;player.add(body,head);player.position.set(0,heightAt(0,12),12);scene.add(player);engine.current={player,camera,heading:Math.PI,pitch:0,velocity:0,renderer};
+    const clock=new THREE.Clock();let raf=0,lastDepth=-1;
+    const animate=()=>{const dt=Math.min(.04,clock.getDelta()),e=engine.current!;if(keys.current.arrowleft)e.heading+=dt*1.5;if(keys.current.arrowright)e.heading-=dt*1.5;const forward=(keys.current.w||keys.current.arrowup?1:0)-(keys.current.s||keys.current.arrowdown?1:0),strafe=(keys.current.d?1:0)-(keys.current.a?1:0);const dir=new THREE.Vector3(Math.sin(e.heading),0,Math.cos(e.heading)),side=new THREE.Vector3(dir.z,0,-dir.x),move=dir.multiplyScalar(forward).add(side.multiplyScalar(strafe));if(move.lengthSq())move.normalize();const waterZone=e.player.position.x>21&&e.player.position.z>-30&&e.player.position.z<106;e.velocity+=(waterZone?-1.3: -10)*dt;const targetGround=waterZone?-9.3:heightAt(e.player.position.x,e.player.position.z);const speed=waterZone?3.2:7.3;const old=e.player.position.clone(),next=old.clone().addScaledVector(move,speed*dt);const playerBox=new THREE.Box3(new THREE.Vector3(next.x-.38,next.y,next.z-.38),new THREE.Vector3(next.x+.38,next.y+2.2,next.z+.38));if(!collision.some(b=>b.intersectsBox(playerBox))){e.player.position.x=next.x;e.player.position.z=next.z}if(waterZone){e.player.position.y=Math.max(targetGround,e.player.position.y+e.velocity*dt)}else{e.player.position.y=targetGround;e.velocity=0}const dep=Math.max(0,1-e.player.position.y);if(Math.abs(dep-lastDepth)>.15){lastDepth=dep;setDepth(dep)}const eye=e.player.position.clone().add(new THREE.Vector3(0,1.72,0));if(view==="first"){camera.position.copy(eye);const look=new THREE.Vector3(Math.sin(e.heading)*Math.cos(e.pitch),Math.sin(e.pitch),Math.cos(e.heading)*Math.cos(e.pitch));camera.lookAt(eye.clone().add(look))}else{const back=new THREE.Vector3(-Math.sin(e.heading)*6.7,3.8,-Math.cos(e.heading)*6.7);camera.position.lerp(eye.clone().add(back),1-Math.pow(.001,dt));camera.lookAt(eye)}scene.fog!.color.set(waterZone&&dep>.1?0x316b74:0xa9ccda);renderer.setClearColor(scene.fog!.color);renderer.render(scene,camera);raf=requestAnimationFrame(animate)};animate();
+    const resize=()=>{camera.aspect=host.clientWidth/host.clientHeight;camera.updateProjectionMatrix();renderer.setSize(host.clientWidth,host.clientHeight)};addEventListener("resize",resize);
+    const click=()=>renderer.domElement.requestPointerLock();const lock=()=>setLocked(document.pointerLockElement===renderer.domElement);const mouse=(ev:MouseEvent)=>{if(document.pointerLockElement!==renderer.domElement)return;const e=engine.current!;e.heading-=ev.movementX*.002;e.pitch=Math.max(-1.15,Math.min(1.15,e.pitch-ev.movementY*.0016))};renderer.domElement.addEventListener("click",click);document.addEventListener("pointerlockchange",lock);document.addEventListener("mousemove",mouse);
+    return()=>{cancelAnimationFrame(raf);removeEventListener("resize",resize);document.removeEventListener("pointerlockchange",lock);document.removeEventListener("mousemove",mouse);renderer.dispose();host.removeChild(renderer.domElement);engine.current=null};
+  },[started,coords,view]);
 
-  useEffect(() => {
-    const down = (e: KeyboardEvent) => { keys.current[e.key.toLowerCase()] = true; if (["w","a","s","d"," "].includes(e.key.toLowerCase())) e.preventDefault(); };
-    const up = (e: KeyboardEvent) => { keys.current[e.key.toLowerCase()] = false; };
-    addEventListener("keydown", down); addEventListener("keyup", up);
-    return () => { removeEventListener("keydown", down); removeEventListener("keyup", up); };
-  }, []);
-
-  useEffect(() => {
-    if (!started) return;
-    const canvas = canvasRef.current!; const ctx = canvas.getContext("2d")!;
-    let raf = 0; let last = performance.now();
-    const buildings = [
-      [-22,-34,12,22,18], [18,-40,17,14,25], [42,-18,13,20,13], [-46,-4,18,15,30],
-      [-27,28,14,20,15], [12,35,24,13,21], [43,34,15,16,12], [4,-14,12,12,36]
-    ];
-    const project = (x:number,y:number,z:number,w:number,h:number,heading:number,camY:number) => {
-      const s=Math.sin(heading), c=Math.cos(heading); const dx=x-player.current.x, dz=z-player.current.z;
-      const rx=dx*c-dz*s, rz=dx*s+dz*c; if(rz<1) return null;
-      const scale=Math.min(w,h)*0.86/rz; return {x:w/2+rx*scale,y:h*.53-(y-camY)*scale,scale,depth:rz};
-    };
-    const loop = (now:number) => {
-      const dt=Math.min(.04,(now-last)/1000); last=now; const p=player.current;
-      if(keys.current.a||keys.current.arrowleft) p.heading-=dt*1.6;
-      if(keys.current.d||keys.current.arrowright) p.heading+=dt*1.6;
-      const dir=(keys.current.w||keys.current.arrowup?1:0)-(keys.current.s||keys.current.arrowdown?1:0);
-      p.x+=Math.sin(p.heading)*dir*dt*8; p.z+=Math.cos(p.heading)*dir*dt*8;
-      const water=p.x>20 && p.z>4; p.submerged += ((water?1:0)-p.submerged)*dt*.5; p.y=2.4-p.submerged*7;
-      const dpr=Math.min(devicePixelRatio,2), rect=canvas.getBoundingClientRect();
-      if(canvas.width!==rect.width*dpr||canvas.height!==rect.height*dpr){canvas.width=rect.width*dpr;canvas.height=rect.height*dpr}
-      ctx.setTransform(dpr,0,0,dpr,0,0); const w=rect.width,h=rect.height;
-      const camY=p.y+(view==="follow"?3.8:0);
-      const sky=ctx.createLinearGradient(0,0,0,h*.58); sky.addColorStop(0,"#a9d4e5");sky.addColorStop(1,"#e9e1c9");ctx.fillStyle=sky;ctx.fillRect(0,0,w,h);
-      ctx.fillStyle=p.submerged>.25?"#306f78":"#788d59";ctx.fillRect(0,h*.53,w,h*.47);
-      // rolling terrain bands
-      for(let i=0;i<9;i++){const yy=h*.55+i*h*.055;ctx.fillStyle=`rgba(70,88,49,${.08+i*.035})`;ctx.beginPath();ctx.moveTo(0,yy);for(let x=0;x<=w;x+=30)ctx.lineTo(x,yy+Math.sin(x*.013+i+coords.lat)*9);ctx.lineTo(w,h);ctx.lineTo(0,h);ctx.fill()}
-      // water body
-      const waterPoly=[project(20,0,4,w,h,p.heading,camY),project(80,0,4,w,h,p.heading,camY),project(80,0,70,w,h,p.heading,camY),project(20,0,70,w,h,p.heading,camY)].filter(Boolean) as any[];
-      if(waterPoly.length>2){ctx.fillStyle="rgba(45,128,150,.72)";ctx.beginPath();ctx.moveTo(waterPoly[0].x,waterPoly[0].y);waterPoly.slice(1).forEach(q=>ctx.lineTo(q.x,q.y));ctx.fill()}
-      // road
-      const road=[project(-5,.03,-80,w,h,p.heading,camY),project(5,.03,-80,w,h,p.heading,camY),project(5,.03,90,w,h,p.heading,camY),project(-5,.03,90,w,h,p.heading,camY)].filter(Boolean) as any[];
-      if(road.length>2){ctx.fillStyle="#6d6d66";ctx.beginPath();ctx.moveTo(road[0].x,road[0].y);road.slice(1).forEach(q=>ctx.lineTo(q.x,q.y));ctx.fill()}
-      const sorted=buildings.map(b=>({b,q:project(b[0],0,b[1],w,h,p.heading,camY)})).filter(o=>o.q).sort((a,b)=>b.q!.depth-a.q!.depth);
-      sorted.forEach(({b,q})=>{const [,,bw,,bh]=b;const ww=bw*q!.scale,hh=bh*q!.scale;ctx.fillStyle="#c7bba4";ctx.fillRect(q!.x-ww/2,q!.y-hh,ww,hh);ctx.fillStyle="#ede3ce";ctx.fillRect(q!.x-ww/2,q!.y-hh,ww,Math.max(2,hh*.06));ctx.fillStyle="rgba(54,78,83,.62)";for(let fy=q!.y-hh+8*q!.scale;fy<q!.y-4;fy+=4*q!.scale){ctx.fillRect(q!.x-ww*.34,fy,ww*.22,Math.max(2,q!.scale));ctx.fillRect(q!.x+ww*.12,fy,ww*.22,Math.max(2,q!.scale))}});
-      if(view==="follow"){ctx.strokeStyle="rgba(245,248,241,.65)";ctx.lineWidth=5;ctx.beginPath();ctx.arc(w/2,h*.63,12,0,Math.PI*2);ctx.moveTo(w/2,h*.65);ctx.lineTo(w/2,h*.77);ctx.moveTo(w/2,h*.69);ctx.lineTo(w/2-18,h*.73);ctx.moveTo(w/2,h*.69);ctx.lineTo(w/2+18,h*.73);ctx.stroke()}
-      if(p.submerged>.03){ctx.fillStyle=`rgba(10,75,92,${Math.min(.72,p.submerged*.7)})`;ctx.fillRect(0,0,w,h);ctx.fillStyle="#d9f1ed";ctx.font="500 13px sans-serif";ctx.fillText(`水下 ${Math.max(0,-p.y).toFixed(1)} m`,22,h-24)}
-      ctx.strokeStyle="rgba(255,255,255,.8)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(w/2-8,h/2);ctx.lineTo(w/2+8,h/2);ctx.moveTo(w/2,h/2-8);ctx.lineTo(w/2,h/2+8);ctx.stroke();
-      raf=requestAnimationFrame(loop);
-    }; raf=requestAnimationFrame(loop); return()=>cancelAnimationFrame(raf);
-  }, [started, view, coords]);
-
-  const begin = () => { setCoords(draft); player.current={x:0,z:10,y:2.4,heading:0,submerged:0}; setStarted(true); };
-
+  const begin=()=>{setCoords(draft);setStarted(true)};
+  const touch=(key:string,on:boolean)=>{keys.current[key]=on};
   return <main className={started?"game active":"game"}>
-    <canvas ref={canvasRef} aria-label="漫步地球 3D 遊戲場景" />
-    {!started && <section className="landing">
-      <div className="eyebrow"><span/> WALK THE EARTH · 地理實驗 001</div>
-      <h1>漫步<br/><i>地球</i></h1>
-      <p className="lead">從你所在之處出發。真實地理成為低多邊形世界，讓雙腳抵達每一個座標。</p>
-      <div className="coord-card">
-        <div className="coord-head"><span>起始座標</span><button onClick={locate} disabled={locating}>{locating?"定位中":"◎ 使用我的位置"}</button></div>
-        <div className="inputs"><label>緯度<input type="number" step="0.0001" value={draft.lat} onChange={e=>setDraft({...draft,lat:+e.target.value})}/></label><label>經度<input type="number" step="0.0001" value={draft.lon} onChange={e=>setDraft({...draft,lon:+e.target.value})}/></label></div>
-        <div className="status"><span className="pulse"/>{status}</div>
-        <button className="start" onClick={begin}>開始漫步 <b>→</b></button>
-      </div>
-      <footer>開放地理資料驅動 · 1:1 真實比例 · 實驗性原型</footer>
-    </section>}
-    {started && <>
-      <header className="hud-top"><button className="brand" onClick={()=>setStarted(false)}>漫步地球</button><div className="where"><small>目前座標</small>{coords.lat.toFixed(5)}° N&nbsp;&nbsp; {coords.lon.toFixed(5)}° E</div><button className="exit" onClick={()=>setStarted(false)}>變更地點</button></header>
-      <aside className="hud-side"><div><small>視角</small><button className={view==="first"?"on":""} onClick={()=>setView("first")}>第一人稱</button><button className={view==="follow"?"on":""} onClick={()=>setView("follow")}>背後跟隨</button></div><div><small>移動</small><p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></p><span>或方向鍵</span></div></aside>
-      <div className="data-note"><span/> 原型地形已生成<br/><small>建築 · 道路 · 水體 · 等高起伏</small></div>
-    </>}
+    <div ref={mount} className="world" aria-label="漫步地球 WebGL 3D 遊戲場景"/>
+    {!started&&<section className="landing"><div className="eyebrow"><span/> WALK THE EARTH · WEBGL 3D</div><h1>漫步<br/><i>地球</i></h1><p className="lead">從你所在之處出發。真實地理成為可探索的立體世界，讓雙腳抵達每一個座標。</p><div className="coord-card"><div className="coord-head"><span>起始座標</span><button onClick={locate} disabled={locating}>{locating?"定位中":"◎ 使用我的位置"}</button></div><div className="inputs"><label>緯度<input type="number" step="0.0001" value={draft.lat} onChange={e=>setDraft({...draft,lat:+e.target.value})}/></label><label>經度<input type="number" step="0.0001" value={draft.lon} onChange={e=>setDraft({...draft,lon:+e.target.value})}/></label></div><div className="status"><span className="pulse"/>{status}</div><button className="start" onClick={begin}>進入 3D 世界 <b>→</b></button></div><footer>WebGL 真實 3D · 1:1 比例 · 實驗性原型</footer></section>}
+    {started&&<><header className="hud-top"><button className="brand" onClick={()=>setStarted(false)}>漫步地球</button><div className="where"><small>目前座標</small>{coords.lat.toFixed(5)}° N&nbsp;&nbsp; {coords.lon.toFixed(5)}° E</div><button className="exit" onClick={()=>setStarted(false)}>變更地點</button></header><aside className="hud-side"><div><small>視角</small><button className={view==="first"?"on":""} onClick={()=>setView("first")}>第一人稱</button><button className={view==="follow"?"on":""} onClick={()=>setView("follow")}>背後跟隨</button></div><div><small>移動</small><p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></p><span>點擊畫面後，以滑鼠環視</span></div></aside><div className="crosshair">＋</div>{!locked&&<div className="look-tip">點擊場景 · 啟用滑鼠環視</div>}<div className="data-note"><span/> WebGL 3D 場景運行中<br/><small>{depth>0?`水下深度 ${depth.toFixed(1)} m`:`立體地形 · 實體碰撞 · 動態光影`}</small></div><div className="touch"><button onPointerDown={()=>touch("w",true)} onPointerUp={()=>touch("w",false)}>↑</button><span><button onPointerDown={()=>touch("a",true)} onPointerUp={()=>touch("a",false)}>←</button><button onPointerDown={()=>touch("s",true)} onPointerUp={()=>touch("s",false)}>↓</button><button onPointerDown={()=>touch("d",true)} onPointerUp={()=>touch("d",false)}>→</button></span></div></>}
   </main>;
 }
