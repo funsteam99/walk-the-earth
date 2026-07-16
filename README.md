@@ -218,6 +218,8 @@ WebGL 沒有單一固定的「最多物件數」，真正限制通常是 draw ca
 - Open-Meteo Elevation API／Copernicus GLO-90
 - Cloudflare Workers 相容部署
 - OpenAI Sites Hosting
+- GitHub Pages 靜態前端
+- Cloudflare Worker 公開地理 API（部署準備中）
 
 主要檔案：
 
@@ -228,7 +230,162 @@ app/api/osm/route.ts                 OSM／Overpass 地圖代理
 app/api/elevation/route.ts           高程網格代理
 public/offline/fishermans-wharf.json 淡水漁人碼頭內建備援場景
 .openai/hosting.json                 Sites 部署設定
+github-pages/                        GitHub Pages 專用靜態入口
+vite.pages.config.ts                 GitHub Pages 靜態建置設定
+.github/workflows/deploy-pages.yml   GitHub Pages 自動部署流程
+geo-worker/index.ts                  公開 OSM／高程代理 Worker
+wrangler.geo.jsonc                   公開 Worker 部署設定
 ```
+
+## GitHub Pages 與公開地理 API
+
+這一節記錄 GitHub Pages 上線後遇到的問題、架構決策、目前進度與接手方式。即使日後更換開發者，也應先閱讀本節再調整部署。
+
+### 為什麼 GitHub Pages 一開始只能進入淡水漁人碼頭
+
+GitHub Pages 只能提供靜態 HTML、CSS、JavaScript 和 JSON，不能執行 Next.js API 路由。為了保留任意經緯度功能，第一版 GitHub Pages 被設定為呼叫既有站點：
+
+```text
+GitHub Pages
+  ├─ /api/osm       → walk-the-earth-tw.funsteam99.chatgpt.site
+  └─ /api/elevation → walk-the-earth-tw.funsteam99.chatgpt.site
+```
+
+但既有 Sites 站點需要登入。從 GitHub Pages 發出的跨網域請求實測結果為：
+
+```text
+/api/osm       → HTTP 401 Unauthorized
+/api/elevation → HTTP 401 Unauthorized
+```
+
+前端收到失敗結果後會正確啟動備援邏輯，因此玩家永遠被帶到淡水漁人碼頭。這不是 Three.js、GitHub Pages 或離線地圖故障，而是 API 的存取權限造成。
+
+### 為什麼需要公開 API
+
+靜態前端仍然可以顯示真實動態地圖，只要有一個不要求玩家登入的公開 API。公開 API 的工作是：
+
+1. 接收玩家座標。
+2. 驗證緯度與經度。
+3. 代替瀏覽器呼叫 Overpass API。
+4. 代替瀏覽器呼叫 Open-Meteo Elevation API。
+5. 回傳 CORS 標頭，允許 GitHub Pages 使用。
+6. 限制地物數量並設定逾時與快取。
+
+因此最終資料流規畫為：
+
+```text
+玩家
+  ↓
+GitHub Pages 靜態 3D 前端
+  ↓
+公開 Cloudflare Worker
+  ├─ Overpass API → OpenStreetMap 地物
+  └─ Open-Meteo   → Copernicus GLO-90 高程
+
+任何一段失敗
+  ↓
+內建淡水漁人碼頭備援場景
+```
+
+Cloudflare 不是唯一選擇，也可以改用 Vercel Functions、Netlify Functions、自建伺服器或其他公開 Serverless 平台。選擇 Cloudflare Worker 的原因是免費額度、全球節點、CORS 控制及現有 Wrangler 相容性。
+
+### GitHub 發布狀態
+
+| 項目 | 狀態 |
+| --- | --- |
+| 原始碼儲存庫 | 已完成：`https://github.com/funsteam99/walk-the-earth` |
+| GitHub Pages | 已完成：`https://funsteam99.github.io/walk-the-earth/` |
+| Pages 自動部署 | 已完成；推送 `main` 後由 GitHub Actions 發布 |
+| 靜態 3D 遊戲 | 已完成 |
+| 內建離線地圖 | 已完成 |
+| GitHub Pages 真實地圖 | 尚未完成；等待公開 Worker 上線 |
+
+### Cloudflare 操作紀錄
+
+已完成：
+
+- Cloudflare 帳號登入與 Wrangler OAuth 授權。
+- GitHub 帳號 `funsteam99` 已連接 Cloudflare。
+- Cloudflare 建立頁已選擇 `funsteam99/walk-the-earth`。
+- 公開 Worker 程式已寫入 `geo-worker/index.ts`。
+- Worker 設定已寫入 `wrangler.geo.jsonc`。
+- 以上兩個檔案已推送到 GitHub。
+- Worker 名稱預定為 `walk-the-earth-geo-api`。
+
+遇到的問題：
+
+- Wrangler 已成功上傳 Worker 程式，但帳號尚未建立 `workers.dev` 子網域，因此沒有公開網址。
+- 曾嘗試使用 `geo-api.shezi.org.tw`，但 `shezi.org.tw` 不在目前 Cloudflare 帳號的 DNS Zone 中，因此 Cloudflare 拒絕建立 Custom Domain。
+- 將 GitHub 連接到 Cloudflare 本身沒有錯，但必須以 Worker 設定部署，不能把它當成另一個純 Pages 網站。
+
+### Cloudflare 建立頁正確設定
+
+目前 Cloudflare 新版畫面標題為 `Set up your application`。正確欄位如下：
+
+| 欄位 | 設定值 |
+| --- | --- |
+| Repository | `funsteam99/walk-the-earth` |
+| Project name | `walk-the-earth-geo-api` |
+| Build command | 留空 |
+| Deploy command | `npx wrangler deploy --config wrangler.geo.jsonc` |
+| Production branch | `main` |
+| Builds for non-production branches | 可關閉，非必要 |
+
+按下 Cloudflare 的 `Deploy` 會建立外部服務，應確認上述欄位後再執行。
+
+### 目前精確停留點
+
+截至本文件更新時：
+
+> Worker 程式與設定已在 GitHub，但 Cloudflare 的 Deploy 尚未確認完成，GitHub Pages 仍指向需要登入的舊 API，所以目前仍會進入淡水漁人碼頭模擬模式。
+
+接下來應依序完成：
+
+1. 在 Cloudflare `Set up your application` 頁填入上表設定。
+2. 按下 `Deploy`。
+3. 等待 Cloudflare 顯示公開 Worker 網址，格式通常為：
+
+   ```text
+   https://walk-the-earth-geo-api.<帳號子網域>.workers.dev
+   ```
+
+4. 測試以下三個網址：
+
+   ```text
+   <Worker URL>/health
+   <Worker URL>/api/osm?lat=25.033&lon=121.5654
+   <Worker URL>/api/elevation?lat=25.033&lon=121.5654
+   ```
+
+5. 將 `app/page.tsx` 的 `hostedApiOrigin` 改成 Worker URL。
+6. 執行 `npm run build:pages`。
+7. 提交並推送 `main`，等待 GitHub Actions 完成。
+8. 在 GitHub Pages 輸入非淡水座標，確認顯示「已載入 N 個地物」，而不是「離線模擬模式」。
+
+### 公開 Worker 的安全範圍
+
+Worker 只提供唯讀 GET／OPTIONS 端點，不包含帳號、資料庫或寫入功能。目前程式包含：
+
+- 經緯度格式與範圍驗證。
+- Overpass 30 秒逾時。
+- Open-Meteo 20 秒逾時。
+- OSM 回傳最多 1200 個地物。
+- 允許 GitHub Pages 與既有自訂 Pages 網域的 CORS。
+- 地圖及高程快取標頭。
+- `/health` 健康檢查端點。
+
+公開端點仍可能被他人呼叫。若流量增加，後續應加入 Cloudflare Rate Limiting、快取 API、來源限制和監控。
+
+### 故障排查
+
+| 現象 | 可能原因 | 處理方式 |
+| --- | --- | --- |
+| 永遠進入漁人碼頭 | API 回傳 401、CORS 或 Worker 未部署 | 用瀏覽器開啟 `/health`，再檢查 `hostedApiOrigin` |
+| Cloudflare 顯示找不到 `wrangler.geo.jsonc` | GitHub 尚未同步或 Root directory 錯誤 | 確認 `main` 分支檔案存在，Root directory 使用 `/` |
+| `workers.dev` 尚未註冊 | 帳號第一次使用 Workers | 從 Workers & Pages 建立／部署第一個 Worker |
+| Custom Domain 找不到 Zone | 網域 DNS 不在該 Cloudflare 帳號 | 使用 `workers.dev`，或先把網域加入 Cloudflare |
+| Overpass 回傳 504 | 上游服務繁忙 | 稍後重試，遊戲會使用離線場景 |
+| GitHub Pages 更新後仍是舊版 | Actions 尚未完成或瀏覽器快取 | 查看 Actions，成功後強制重新整理 |
 
 ## 本機執行
 
