@@ -3,6 +3,7 @@
 一款以真實地理資料生成場景的第一人稱網頁散步遊戲。
 
 目前公開測試版：[https://walk-the-earth-tw.funsteam99.chatgpt.site](https://walk-the-earth-tw.funsteam99.chatgpt.site)
+<img width="994" height="601" alt="748096751_10243109903548029_4526875377261479627_n" src="https://github.com/user-attachments/assets/8c599183-6208-40cc-90e4-32d9c13918db" />
 
 ## 專案起點
 
