@@ -314,7 +314,8 @@ Cloudflare 不是唯一選擇，也可以改用 Vercel Functions、Netlify Funct
 
 遇到的問題：
 
-- Wrangler 已成功上傳 Worker 程式，但帳號尚未建立 `workers.dev` 子網域，因此沒有公開網址。
+- Cloudflare Worker 已公開部署，GitHub Pages 可透過它取得真實地圖與高度資料。
+- 公開 API：`https://walk-the-earth-geo-api.funsteam99.workers.dev`
 - 曾嘗試使用 `geo-api.shezi.org.tw`，但 `shezi.org.tw` 不在目前 Cloudflare 帳號的 DNS Zone 中，因此 Cloudflare 拒絕建立 Custom Domain。
 - 將 GitHub 連接到 Cloudflare 本身沒有錯，但必須以 Worker 設定部署，不能把它當成另一個純 Pages 網站。
 
@@ -346,7 +347,7 @@ Cloudflare 不是唯一選擇，也可以改用 Vercel Functions、Netlify Funct
 3. 等待 Cloudflare 顯示公開 Worker 網址，格式通常為：
 
    ```text
-   https://walk-the-earth-geo-api.<帳號子網域>.workers.dev
+   https://walk-the-earth-geo-api.funsteam99.workers.dev
    ```
 
 4. 測試以下三個網址：
@@ -357,7 +358,7 @@ Cloudflare 不是唯一選擇，也可以改用 Vercel Functions、Netlify Funct
    <Worker URL>/api/elevation?lat=25.033&lon=121.5654
    ```
 
-5. 將 `app/page.tsx` 的 `hostedApiOrigin` 改成 Worker URL。
+5. `app/page.tsx` 的 `hostedApiOrigin` 已改成上述 Worker URL。
 6. 執行 `npm run build:pages`。
 7. 提交並推送 `main`，等待 GitHub Actions 完成。
 8. 在 GitHub Pages 輸入非淡水座標，確認顯示「已載入 N 個地物」，而不是「離線模擬模式」。
