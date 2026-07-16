@@ -13,6 +13,10 @@ export async function GET(request: NextRequest) {
     way(around:500,${lat},${lon})["highway"];
     way(around:500,${lat},${lon})["natural"="water"];
     way(around:500,${lat},${lon})["waterway"="riverbank"];
+    way(around:500,${lat},${lon})["natural"="wood"];
+    way(around:500,${lat},${lon})["landuse"~"forest|grass|meadow"];
+    way(around:500,${lat},${lon})["leisure"="park"];
+    way(around:500,${lat},${lon})["railway"];
   );out tags geom;`;
   try {
     const response = await fetch("https://overpass-api.de/api/interpreter", {
